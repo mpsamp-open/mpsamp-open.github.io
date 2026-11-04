@@ -1,0 +1,75 @@
+name: Deploy website (from wagu)
+# The website source lives in ThirtyFoxMCx00E1/wagu (docs/ + release files). This repo only
+# publishes it at https://mpsamp-open.github.io : every 10 minutes it checks wagu's main branch
+# and rebuilds the site when there is a new commit (or run it by hand: Actions > Run workflow).
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Deploy even if wagu has no new commit'
+        type: boolean
+        default: true
+  repository_dispatch:
+    types: [wagu-updated]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - id: check
+        name: New wagu commit?
+        run: |
+          HEAD=$(git ls-remote https://github.com/ThirtyFoxMCx00E1/wagu.git refs/heads/main | cut -f1)
+          LIVE=$(curl -fsSL "https://mpsamp-open.github.io/wagu-commit.txt?t=$(date +%s)" 2>/dev/null | tr -d '\r\n ' || true)
+          echo "wagu main: $HEAD   live site: ${LIVE:-none}"
+          if [ "$HEAD" != "$LIVE" ] || [ "${{ github.event_name }}" != "schedule" ]; then echo changed=true >> $GITHUB_OUTPUT; else echo changed=false >> $GITHUB_OUTPUT; fi
+          echo "head=$HEAD" >> $GITHUB_OUTPUT
+      - name: Get the site files from wagu (only what the site needs)
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git clone --filter=blob:none --no-checkout --depth 1 https://github.com/ThirtyFoxMCx00E1/wagu.git wagu
+          cd wagu
+          git sparse-checkout init --no-cone
+          git sparse-checkout set '/docs/' '/tools/publish_site.py'
+          git checkout main
+          V=$(python3 -c "import json;print(json.load(open('docs/release.json'))['tag_name'].lstrip('v'))")
+          echo "release $V"
+          git sparse-checkout set '/docs/' '/tools/publish_site.py' '/bin/libMP32.so' '/bin/libMP64.so' '/server/' '/src/net/' '/third_party/mbedtls/' \
+            "/release/MP-$V-client.zip" "/release/MP-$V-full.zip" "/release/HiveMQ-kit-$V.zip" '/release/MP-Voice.apk' '/release/MP-Textdraw-Editor.apk'
+      - uses: actions/configure-pages@v5
+        if: steps.check.outputs.changed == 'true'
+      - name: Build the site
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd wagu
+          python3 tools/publish_site.py "" ../_site
+          git rev-parse HEAD > ../_site/wagu-commit.txt
+          du -sh ../_site
+      - uses: actions/upload-pages-artifact@v4
+        if: steps.check.outputs.changed == 'true'
+        with:
+          name: github-pages
+          path: _site
+          retention-days: 1
+  deploy:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
