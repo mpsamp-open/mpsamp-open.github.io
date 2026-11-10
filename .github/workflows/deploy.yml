@@ -25,11 +25,23 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.check.outputs.changed }}
+    env:
+      WAGU: git@github.com:ThirtyFoxMCx00E1/wagu.git
     steps:
+      # wagu is private: it is read with a read-only deploy key (secret WAGU_DEPLOY_KEY).
+      # Only the public site files are published here, never the mod source.
+      - name: Read access to wagu
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.WAGU_DEPLOY_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519,rsa github.com >> ~/.ssh/known_hosts 2>/dev/null
       - id: check
         name: New wagu commit?
         run: |
-          HEAD=$(git ls-remote https://github.com/ThirtyFoxMCx00E1/wagu.git refs/heads/main | cut -f1)
+          HEAD=$(git ls-remote "$WAGU" refs/heads/main | cut -f1)
+          GIFS=$(git ls-remote "$WAGU" refs/heads/gifs | cut -f1)
+          [ -n "$HEAD" ] || { echo "could not read wagu (deploy key?)"; exit 1; }
+          HEAD="$HEAD-$GIFS"
           LIVE=$(curl -fsSL "https://mpsamp-open.github.io/wagu-commit.txt?t=$(date +%s)" 2>/dev/null | tr -d '\r\n ' || true)
           echo "wagu main: $HEAD   live site: ${LIVE:-none}"
           if [ "$HEAD" != "$LIVE" ] || [ "${{ github.event_name }}" != "schedule" ]; then echo changed=true >> $GITHUB_OUTPUT; else echo changed=false >> $GITHUB_OUTPUT; fi
@@ -37,7 +49,7 @@ jobs:
       - name: Get the site files from wagu (only what the site needs)
         if: steps.check.outputs.changed == 'true'
         run: |
-          git clone --filter=blob:none --no-checkout --depth 1 https://github.com/ThirtyFoxMCx00E1/wagu.git wagu
+          git clone --filter=blob:none --no-checkout --depth 1 "$WAGU" wagu
           cd wagu
           git sparse-checkout init --no-cone
           git sparse-checkout set '/docs/' '/tools/publish_site.py'
@@ -45,7 +57,11 @@ jobs:
           V=$(python3 -c "import json;print(json.load(open('docs/release.json'))['tag_name'].lstrip('v'))")
           echo "release $V"
           git sparse-checkout set '/docs/' '/tools/publish_site.py' '/bin/libMP32.so' '/bin/libMP64.so' '/server/' '/src/net/' '/third_party/mbedtls/' \
-            "/release/MP-$V-client.zip" "/release/MP-$V-full.zip" "/release/HiveMQ-kit-$V.zip" '/release/MP-Voice.apk' '/release/MP-Textdraw-Editor.apk'
+            "/release/MP-$V-client.zip" "/release/MP-$V-full.zip" "/release/HiveMQ-kit-$V.zip" '/release/MP-Voice.apk' '/release/MP-Textdraw-Editor.apk' \
+            '/HiveMQ/' '/Host/DayZ/models/' '/Host/DayZ/mapping/' '/Host/DayZ/xkiloader/' '/Host/Media/'
+          # the gifs branch (GIF sheets the game shows) goes to /gifs/
+          git clone -q --depth 1 --branch gifs "$WAGU" _gifs || echo "no gifs branch"
+          rm -rf _gifs/.git
       - uses: actions/configure-pages@v5
         if: steps.check.outputs.changed == 'true'
       - name: Build the site
@@ -53,7 +69,7 @@ jobs:
         run: |
           cd wagu
           python3 tools/publish_site.py "" ../_site
-          git rev-parse HEAD > ../_site/wagu-commit.txt
+          echo "${{ steps.check.outputs.head }}" > ../_site/wagu-commit.txt
           du -sh ../_site
       - uses: actions/upload-pages-artifact@v4
         if: steps.check.outputs.changed == 'true'
