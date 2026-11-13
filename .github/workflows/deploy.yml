@@ -58,7 +58,7 @@ jobs:
           echo "release $V"
           git sparse-checkout set '/docs/' '/tools/publish_site.py' '/bin/libMP32.so' '/bin/libMP64.so' '/server/' '/src/net/' '/third_party/mbedtls/' \
             "/release/MP-$V-client.zip" "/release/MP-$V-full.zip" "/release/HiveMQ-kit-$V.zip" '/release/MP-Voice.apk' '/release/MP-Textdraw-Editor.apk' '/release/Moquil.apk' \
-            '/HiveMQ/' '/Host/DayZ/models/' '/Host/DayZ/mapping/' '/Host/DayZ/xkiloader/' '/Host/Media/'
+            '/HiveMQ/' '/Host/DayZ/models/' '/Host/DayZ/mapping/' '/Host/DayZ/pack/' '/Host/Media/'
           # the gifs branch (GIF sheets the game shows) goes to /gifs/
           git clone -q --depth 1 --branch gifs "$WAGU" _gifs || echo "no gifs branch"
           rm -rf _gifs/.git
